@@ -38,6 +38,10 @@ jobs:
         env:
           SIMULAR_QUEDA: ${{ inputs.simular_queda }}
         run: |
+          # O runner invoca este script com "bash -e". Aqui o erro e esperado
+          # (curl falha quando o servico esta fora do ar), entao desligamos o
+          # errexit de proposito e tratamos cada codigo de retorno na mao.
+          set +e
           set -uo pipefail
 
           TIMEOUT=10          # segundos por tentativa
@@ -137,12 +141,21 @@ jobs:
 
       - name: Abrir, manter ou fechar o incidente
         run: |
+          # Mesmo motivo do step anterior: quem decide o resultado deste job e o
+          # exit explicito no fim, nao o errexit que o runner injeta.
+          set +e
           set -uo pipefail
 
           FORA="$(awk -F'|' '$3 == "DOWN" { printf "%s%s", sep, $1; sep = ", " }' "$RESULTADOS")"
 
           # Issue de incidente aberta (se houver). So existe uma por vez, por construcao.
+          # Se esta consulta falhar nao da para decidir nada: abortar e melhor do
+          # que assumir "nenhuma aberta" e abrir uma issue duplicada.
           ABERTA="$(gh issue list --label "$LABEL_INCIDENTE" --state open --limit 1 --json number,createdAt)"
+          if [ $? -ne 0 ]; then
+            echo "::error::Nao consegui consultar as issues de incidente."
+            exit 1
+          fi
           NUMERO="$(printf '%s' "$ABERTA" | jq -r '.[0].number // empty')"
           CRIADA_EM="$(printf '%s' "$ABERTA" | jq -r '.[0].createdAt // empty')"
 
@@ -162,7 +175,9 @@ jobs:
               inicio="$(date -u -d "$CRIADA_EM" +%s 2>/dev/null || true)"
               if [ -n "$inicio" ]; then
                 total=$(( $(date -u +%s) - inicio ))
-                [ "$total" -lt 0 ] && total=0
+                if [ "$total" -lt 0 ]; then
+                  total=0
+                fi
                 horas=$(( total / 3600 ))
                 minutos=$(( (total % 3600) / 60 ))
                 if [ "$horas" -gt 0 ]; then
@@ -191,8 +206,14 @@ jobs:
               echo "_Fechado automaticamente pelo monitor._"
             } > recuperado.md
 
-            gh issue comment "$NUMERO" --body-file recuperado.md
-            gh issue close "$NUMERO" --reason completed
+            if ! gh issue comment "$NUMERO" --body-file recuperado.md; then
+              echo "::error::Nao consegui comentar no incidente #${NUMERO}."
+              exit 1
+            fi
+            if ! gh issue close "$NUMERO" --reason completed; then
+              echo "::error::Nao consegui fechar o incidente #${NUMERO}. Feche na mao, senao o monitor fica mudo na proxima queda."
+              exit 1
+            fi
             echo "Incidente #${NUMERO} comentado e fechado (duracao: $duracao)."
             echo "_🟢 Recuperado: incidente #${NUMERO} fechado. Duracao da queda: ${duracao}._" >> "$GITHUB_STEP_SUMMARY"
             exit 0
@@ -243,6 +264,11 @@ jobs:
             --title "🔴 Fora do ar: $FORA" \
             --label "$LABEL_INCIDENTE" \
             --body-file incidente.md)"
+
+          if [ -z "$URL_ISSUE" ]; then
+            echo "::error::Servicos fora do ar ($FORA), mas nao consegui abrir a issue de incidente."
+            exit 1
+          fi
 
           echo "Incidente aberto: $URL_ISSUE"
           echo "_🔴 Fora do ar: **${FORA}**. Incidente aberto: ${URL_ISSUE}_" >> "$GITHUB_STEP_SUMMARY"
