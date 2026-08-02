@@ -275,3 +275,5 @@ jobs:
 
           # Falhar o run de proposito: o e-mail nativo de "workflow falhou" e o segundo aviso.
           exit 1
+
+# Nota: schedule re-registrado em 2026-08-02 (primeiro tick de repo novo não engatou na 1ª hora).
