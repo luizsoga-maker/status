@@ -3,7 +3,7 @@ name: Uptime
 on:
   schedule:
     # A cada 5 minutos (horario UTC; o GitHub pode atrasar alguns minutos em picos)
-    - cron: '*/5 * * * *'
+    - cron: '4-59/5 * * * *' # :04,:09,:14... — evita os minutos :00/:05 congestionados (doc do GitHub) e força re-registro do schedule
   workflow_dispatch:
     inputs:
       simular_queda:
